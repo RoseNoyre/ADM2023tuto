@@ -1,0 +1,177 @@
+---
+title: "R Notebook"
+output: github_document
+---
+
+
+
+```{bash, eval=FALSE}
+wget https://github.com/ANF-MetaBioDiv/course-material/archive/refs/heads/main.zip
+unzip main.zip
+```
+
+```{bash}
+pwd
+cd /home/rstudio/ADM2023tutorielbon
+cp -R ../course-material-main/data/raw ./data
+```
+
+
+
+
+```{r}
+refdb_folder <- here::here("data", "refdb")
+refdb_folder
+if (!dir.exists(refdb_folder)) dir.create(refdb_folder, recursive = TRUE)
+
+# R arrête de télécharger après 60 secondes (par défault)
+getOption("timeout")
+
+# On le change pour 20 minutes 
+options(timeout = 1200)
+
+# On définie deux nouvelles variables pour leurs assigner l'edroit ou l'on veut mettre les données
+silva_train_set <- file.path(refdb_folder,
+                             "silva_nr99_v138.1_train_set.fa.gz")
+
+silva_species_assignment <- file.path(refdb_folder,
+                                      "silva_species_assignment_v138.1.fa.gz")
+```
+
+```{r}
+# On télécharge les bases de données (quiet = true veut dire un faire un téléchargement silencieu)
+if (!file.exists(silva_train_set)) {
+  download.file(
+    "https://zenodo.org/record/4587955/files/silva_nr99_v138.1_train_set.fa.gz",
+    silva_train_set,
+    quiet = TRUE
+  )
+}
+
+if (!file.exists(silva_species_assignment)) {
+  download.file(
+    "https://zenodo.org/record/4587955/files/silva_species_assignment_v138.1.fa.gz",
+    silva_species_assignment,
+    quiet = TRUE
+  )
+}
+```
+
+```{r}
+#On aura besoin de packages pas encore déposés donc pour les charger, on utilise le packages devtools et loads_all.
+devtools::load_all(path ="/home/rstudio/course-material-main/R")
+
+```
+
+
+```{r}
+#On enregistre le chemin d'accès au répertoire contenant les données 
+path_to_fastqs <- here::here("data", "raw")
+#On liste les fichiers transférés. La fonction pattern permet de sélectionner uniquement les noms de fichiers correspondant à l'expression régulière
+fnFs <- sort(list.files(path_to_fastqs,
+                        pattern = "_R1.fastq.gz",
+                        full.names = TRUE))
+
+fnRs <- sort(list.files(path_to_fastqs,
+                        pattern = "_R2.fastq.gz",
+                        full.names = TRUE))
+```
+
+```{r}
+#Basename supprime le chemin pour conserver uniquement le nom du fichier
+#strsplit divise la chaine de cracateres selon un modele defini(document)
+#sapply applique une fonction a chaque element d'une liste ou d'un vecteur.
+sample_names <- basename(fnFs) |>
+  strsplit(split = "_") |>
+  sapply(head, 1)
+
+basename(fnFs) |>
+  head()
+
+basename(fnFs) |>
+  strsplit(split = "_") |>
+  head()
+
+#On extrait le premier élément de chaque fichier
+basename(fnFs) |>
+  strsplit(split = "_") |>
+  sapply(head, 1) |>
+  head()
+gsub("^.+/|_.+$", "", fnFs) |> head()
+```
+
+```{r}
+# create a directory for the outputs
+quality_folder <- here::here("outputs",
+                             "dada2",
+                             "quality_plots")
+
+if (!dir.exists(quality_folder)) {
+  dir.create(quality_folder, recursive = TRUE)
+}
+
+qualityprofile(fnFs,
+               fnRs,
+               file.path(quality_folder, "quality_plots.pdf"))
+```
+
+```{r}
+path_to_trimmed_reads <- here::here(
+  "outputs",
+  "dada2",
+  "trimmed"
+)
+
+if (!dir.exists(path_to_trimmed_reads)) dir.create(path_to_trimmed_reads, recursive = TRUE)
+
+primer_fwd  <- "CCTACGGGNBGCASCAG"
+primer_rev  <- "GACTACNVGGGTATCTAAT"
+
+Biostrings::readDNAStringSet(
+  fnFs[1],
+  format = "fastq",
+  nrec = 10
+)
+
+Biostrings::readDNAStringSet(
+  fnRs[1],
+  format = "fastq",
+  nrec = 10
+)
+```
+
+
+```{bash}
+pwd
+cp -R /home/rstudio/course-material-main/bash .
+```
+
+
+```{r}
+
+(primer_log <- primer_trim(
+  forward_files = fnFs,
+  reverse_files = fnRs,
+  primer_fwd = primer_fwd,
+  primer_rev = primer_rev,
+  output_dir = path_to_trimmed_reads,
+  min_size = 200
+))
+```
+
+```{r}
+nopFw <- sort(list.files(path_to_trimmed_reads, pattern = "R1", full.names = TRUE))
+nopRv <- sort(list.files(path_to_trimmed_reads, pattern = "R2", full.names = TRUE))
+```
+
+```{r}
+path_to_filtered_reads <- here::here("outputs", "dada2", "filtered")
+if (!dir.exists(path_to_filtered_reads)) dir.create(path_to_filtered_reads, recursive = TRUE)
+
+filtFs <- file.path(path_to_filtered_reads, basename(fnFs))
+filtRs <- file.path(path_to_filtered_reads, basename(fnRs))
+
+names(filtFs) <- sample_names
+names(filtRs) <- sample_names
+```
+
