@@ -3,34 +3,38 @@ title: "R Notebook"
 output: github_document
 ---
 
-
-
 ```{bash, eval=FALSE}
-wget https://github.com/ANF-MetaBioDiv/course-material/archive/refs/heads/main.zip
+#I - On prépare le répertoire de travail
+#1) On veut obtenir les fichiers du référentiel
+# wget sert à télécharger ici le référentiel via un lien internet
+wget https://github.com/ANF-MetaBioDiv/course-material/archive/refs/heads/main.zip 
+# La commande unzip main.zip permet d'extraire les fichiers du zip
 unzip main.zip
 ```
 
 ```{bash}
+# pwd sert à savoir ou nous sommes actuellement (dans quel fichier..)
 pwd
+# cd (change directory) permet de changer le chemin du dossier ou fichier
 cd /home/rstudio/ADM2023tutorielbon
+# cp permet de copier le contenu d'un fichier vers un autre par exemple
 cp -R ../course-material-main/data/raw ./data
 ```
 
-
-
-
 ```{r}
+#2) On télécharge la base de données de référence
+# On créer une nouvelle variable qui contient le chemin d'accès au dossier dans lequel on place les bases de données de références. here::here permet de définir un chemin d'accès à partir du principal vers un autre. If permet de rediriger la direction du dossier si la direction vers refdd_folder n'existe pas. Il l'a créera.
 refdb_folder <- here::here("data", "refdb")
 refdb_folder
 if (!dir.exists(refdb_folder)) dir.create(refdb_folder, recursive = TRUE)
 
-# R arrête de télécharger après 60 secondes (par défault)
+# R arrête de télécharger après 60 secondes (par défault). Cette commande permet d'avoir cette information.
 getOption("timeout")
 
 # On le change pour 20 minutes 
 options(timeout = 1200)
 
-# On définie deux nouvelles variables pour leurs assigner l'edroit ou l'on veut mettre les données
+# On définit deux nouvelles variables pour leurs assigner l'endroit ou l'on veut mettre les données
 silva_train_set <- file.path(refdb_folder,
                              "silva_nr99_v138.1_train_set.fa.gz")
 
@@ -39,7 +43,7 @@ silva_species_assignment <- file.path(refdb_folder,
 ```
 
 ```{r}
-# On télécharge les bases de données (quiet = true veut dire un faire un téléchargement silencieu)
+# On télécharge les bases de données (quiet = true veut dire un faire un téléchargement silencieux)
 if (!file.exists(silva_train_set)) {
   download.file(
     "https://zenodo.org/record/4587955/files/silva_nr99_v138.1_train_set.fa.gz",
@@ -58,16 +62,17 @@ if (!file.exists(silva_species_assignment)) {
 ```
 
 ```{r}
-#On aura besoin de packages pas encore déposés donc pour les charger, on utilise le packages devtools et loads_all.
+#3) On veut attacher des fonctions personnalisées
+#On aura besoin de packages pas encore déposés donc pour les charger, on utilise le packages devtools et loads_all. Path permet de définir le chemin d'accès.
 devtools::load_all(path ="/home/rstudio/course-material-main/R")
 
 ```
-
-
 ```{r}
+# II - On entre les fichiers d'entrées 
+#1) On veut localiser les fichiers de séquençage
 #On enregistre le chemin d'accès au répertoire contenant les données 
 path_to_fastqs <- here::here("data", "raw")
-#On liste les fichiers transférés. La fonction pattern permet de sélectionner uniquement les noms de fichiers correspondant à l'expression régulière
+#On liste les fichiers transférés. Une fonction se verra attribuer les données R1 et l'autre les données R2. La fonction pattern permet de sélectionner uniquement les noms de fichiers correspondant à l'expression régulière
 fnFs <- sort(list.files(path_to_fastqs,
                         pattern = "_R1.fastq.gz",
                         full.names = TRUE))
@@ -78,9 +83,9 @@ fnRs <- sort(list.files(path_to_fastqs,
 ```
 
 ```{r}
-#Basename supprime le chemin pour conserver uniquement le nom du fichier
-#strsplit divise la chaine de cracateres selon un modele defini(document)
-#sapply applique une fonction a chaque element d'une liste ou d'un vecteur.
+#2) On veut extraire les noms des échantillons
+#Basename supprime le chemin pour conserver uniquement le nom du fichier. strsplit divise la chaine de caracteres selon un modele defini(document). sapply applique une fonction a chaque element d'une liste ou d'un vecteur. strsplit permet de diviser chaque nom de fichier en un vecteur de 2 éléments. Le résultat est une liste de 2 éléments vecteurs.
+
 sample_names <- basename(fnFs) |>
   strsplit(split = "_") |>
   sapply(head, 1)
@@ -101,21 +106,24 @@ gsub("^.+/|_.+$", "", fnFs) |> head()
 ```
 
 ```{r}
-# create a directory for the outputs
+# III - On veut controler la qualité des séquences
+# Montre à R le chemin qui mène aux graphiques. 
 quality_folder <- here::here("outputs",
                              "dada2",
                              "quality_plots")
-
+# Permet de dire à r de créer la direction si celle-ci n'existe pas
 if (!dir.exists(quality_folder)) {
   dir.create(quality_folder, recursive = TRUE)
 }
-
+# quality_profiles permet de vérifier la qualité des séquences brutes. quality_plot permet de montrer les séquences selectionnées sous forme de graphique.
 qualityprofile(fnFs,
                fnRs,
                file.path(quality_folder, "quality_plots.pdf"))
 ```
-
 ```{r}
+# IV - On veut retirer
+#1) On prépare les résultats
+#On souhaite raccourcir les séquences qui possèdent un Qscore non élevé.
 path_to_trimmed_reads <- here::here(
   "outputs",
   "dada2",
@@ -124,9 +132,12 @@ path_to_trimmed_reads <- here::here(
 
 if (!dir.exists(path_to_trimmed_reads)) dir.create(path_to_trimmed_reads, recursive = TRUE)
 
+#2) On supprime les amorces
+#On attribue aux amorces primer et reverse leurs séquences respectives sur leurs variables respectives.
 primer_fwd  <- "CCTACGGGNBGCASCAG"
 primer_rev  <- "GACTACNVGGGTATCTAAT"
 
+#On lit les 10 premières et les 10 dernières sequences R1 et R2 en format fastq (séquences directes et inversées)
 Biostrings::readDNAStringSet(
   fnFs[1],
   format = "fastq",
@@ -140,15 +151,13 @@ Biostrings::readDNAStringSet(
 )
 ```
 
-
 ```{bash}
+#On regarde ou l'on se trouve et on copie les dossiers et sous dossiers dans le dossier principal
 pwd
 cp -R /home/rstudio/course-material-main/bash .
 ```
-
-
 ```{r}
-
+#primer_trim permet de supprimer les amorces et on l'attribue a une variable. On obtient des séquences avec au minimum 200 paires de bases.
 (primer_log <- primer_trim(
   forward_files = fnFs,
   reverse_files = fnRs,
@@ -160,18 +169,182 @@ cp -R /home/rstudio/course-material-main/bash .
 ```
 
 ```{r}
+#On demande a R de sortir les noms de toutes ces séquences racccourcies et de les mettre dans les vaecteurs associés (R1 et R2)
 nopFw <- sort(list.files(path_to_trimmed_reads, pattern = "R1", full.names = TRUE))
 nopRv <- sort(list.files(path_to_trimmed_reads, pattern = "R2", full.names = TRUE))
 ```
 
 ```{r}
+# V - Nous voulons découper et filtrer de manière qualitative
+# 1) On veut préparer les résultats
+#On créer un dossier et on liste les chemins dans la variable 
 path_to_filtered_reads <- here::here("outputs", "dada2", "filtered")
 if (!dir.exists(path_to_filtered_reads)) dir.create(path_to_filtered_reads, recursive = TRUE)
-
 filtFs <- file.path(path_to_filtered_reads, basename(fnFs))
 filtRs <- file.path(path_to_filtered_reads, basename(fnRs))
 
+#Pour faire le lien entre les fichiers et les noms d'échantillons, on nomme simplement le vecteur de noms de fichiers en utilisant les noms d'échantillons
 names(filtFs) <- sample_names
 names(filtRs) <- sample_names
+
+# 2) Nous executions la fonction suivante qui permet d'obtenir la liste des séquences avec leurs noms et leurs séquences sélectionnées ainsi que leurs sequences supprimées. MinLen retire les séquences plus petites que 150 paires de bases. matchIDs, par défault FALSE et on l'active pour que les séquences extraites seront associées. maxN : les ambiguitées seront retirées (nombre max de bases ambiguës acceptées = 0). maxEE: lire le seuil d'erreurs attendues (EE). L'EE d'une lecture est la somme des probabilités d'erreur de chaque base la composant. Augmentez cette valeur pour accepter davantage de lectures de mauvaise qualité. La première valeur fait référence aux lectures directes et la seconde aux lectures inverses. C'est le nombre d'erreur maximale admise via le Qscolre. TruncQ=2 : tronque les  sequences inférieur à 20 de Qscore.
+(out <- dada2::filterAndTrim(
+  fwd = nopFw,
+  filt = filtFs,
+  rev = nopRv,
+  filt.rev = filtRs,
+  minLen = 150,
+  matchIDs = TRUE,
+  maxN = 0,
+  maxEE = c(3, 3),
+  truncQ = 2
+))
+```
+
+```{r}
+# VI - Débruitage
+# 1) On veut apprendre le modèle d'erreur
+#Tirage aléatoire des séquences lues ce qui va permettre d'obtenir la probabilité qu'une base soit lu à tord via le Qscore(la probabilité sera différente en fonction du Qscore). 
+errF <- dada2::learnErrors(filtFs,
+                           randomize = TRUE,
+                           multithread = TRUE)
+errR <- dada2::learnErrors(filtRs,
+                           randomize = TRUE,
+                           multithread = TRUE)
+#Permet de visualiser le modèle d'erreur 
+dada2::plotErrors(errF, nominalQ=TRUE)
+
+# 2) Déréplication
+#Avant le débruitage, nous devons dérépliquer les séquences en comptant le nombre de lectures pour chaque séquence unique.
+derepFs <- dada2::derepFastq(filtFs, verbose = TRUE)
+derepRs <- dada2::derepFastq(filtRs, verbose = TRUE)
+
+# 3) Nous allons exécuter l'algorithme de débuitage avec en entrée le modèle d'erreur et les séquences dérépliquées.
+dadaFs <- dada2::dada(derepFs, err = errF, multithread = TRUE)
+dadaRs <- dada2::dada(derepRs, err = errR, multithread = TRUE)
+```
+```{r}
+# VII - On veut fusionner les lectures appariées
+#Cela permet d'associer les séquences entre elles sans erreur d'association. verbose permet d'avoir un résumé des resultats de la fonction dada2::mergePairs (comme un print).
+mergers <- dada2::mergePairs(
+  dadaF = dadaFs,
+  derepF = derepFs,
+  dadaR = dadaRs,
+  derepR = derepRs,
+  maxMismatch = 0,
+  verbose = TRUE
+)
+```
+```{r} 
+# VIII - On veut construire la table ASV
+# Création d'une table avec les séquences et leurs nombre de lecture par échantillons.
+seqtab <- dada2::makeSequenceTable(mergers)
+```
+
+```{r}
+# IX - On veut supprimer les chimères
+#On supprime les séquences qui ont un mauvais appariement
+seqtab_nochim <- dada2::removeBimeraDenovo(seqtab,
+                                           method = "consensus",
+                                           multithread = TRUE,
+                                           verbose = TRUE)
+```
+
+```{r}
+# X - On veut affecter l'identité taxonomique des ASV
+#On associe une appartenance taxonomique à nos séquences et permettra l'interepretation de nos séquences dans l'environnement. On utilise l'algorithme pour assigner la taxonomie. Seq : séquence unique sans erreur d'association et sans chimère. refFasta : permet d'accéder à ces séquences. taxLevels associe les niveaux taxonomiques. minBoot : score minimal de bootstrap (confiance) pour affirmer que la séquence est bien dans son bon niveau taxonomique (asscociation taxonomique).
+taxonomy <- dada2::assignTaxonomy(
+  seqs = seqtab_nochim,
+  refFasta = silva_train_set,
+  taxLevels = c("Kingdom", "Phylum", "Class",
+                "Order", "Family", "Genus",
+                "Species"),
+  multithread = TRUE,
+  minBoot = 60
+)
+# Limite : On ne peut pas établir une évaluation au niveau de l'espèce. Cette fonction attribue au niveau espèce au ASV identiques à une séquence de référence.
+taxonomy <- dada2::addSpecies(
+  taxonomy,
+  silva_species_assignment,
+  allowMultiple = FALSE
+)
+```
+
+```{r}
+# XI - On exporte les résultats
+# 1) Les objets R
+#Les résultats peuvent être exportés sous forme d'objets R, un objet pour la table ASV et un autre pour la taxonomie. On créer le fichier et on indique le chemin à R.
+
+export_folder <- here::here("outputs", "dada2", "asv_table")
+
+if (!dir.exists(export_folder)) dir.create(export_folder, recursive = TRUE)
+
+saveRDS(object = seqtab_nochim,
+        file = file.path(export_folder, "seqtab_nochim.rds"))
+
+saveRDS(object = taxonomy,
+        file = file.path(export_folder, "taxonomy.rds"))
+
+# 2) Les fichiers texte
+# On exporte les fichiers en format texte pour pouvoir les réutiliser via un autre programme ou langage.
+asv_seq <- colnames(seqtab_nochim)
+
+#Nous créons des identifiants uniques pour chaque ASV. La séquence elle-même est un identifiant unique, mais nous aimerions avoir quelque chose de plus court.
+ndigits <- nchar(length(asv_seq))
+asv_id <- sprintf(paste0("ASV_%0", ndigits, "d"), seq_along(asv_seq))
+
+#On renomme les différentes variables avec les nouveaux identifiants
+row.names(taxonomy) <- colnames(seqtab_nochim) <- names(asv_seq) <- asv_id
+
+#Ces nouvelles identitées sont collectées dans une nouvelle colonne nommée asv.
+taxonomy_export <- df_export(taxonomy, new_rn = "asv")
+
+seqtab_nochim_export <- t(seqtab_nochim)
+seqtab_nochim_export <- df_export(seqtab_nochim_export, new_rn = "asv")
+
+#On exporte la taxonomie.
+write.table(taxonomy_export,
+            file = file.path(export_folder, "taxonomy.tsv"),
+            quote = FALSE,
+            sep = "\t",
+            row.names = FALSE)
+
+#On exporte le tableau ASV.
+write.table(seqtab_nochim_export,
+            file = file.path(export_folder, "asv_table.tsv"),
+            quote = FALSE,
+            sep = "\t",
+            row.names = FALSE)
+
+#On exporte les séquences en format fasta.
+cat(paste0(">", names(asv_seq), "\n", asv_seq),
+    sep = "\n",
+    file = file.path(export_folder, "asv.fasta"))
+
+# 3) Le journal
+#getN permet d'assembler la table regroupant les statistiques de chaque étapes vu ci dessus.
+getN <- function(x) sum(dada2::getUniques(x))
+
+log_table <- data.frame(
+  input = primer_log$in_reads,
+  with_fwd_primer = primer_log$`w/adapters`,
+  with_rev_primer = primer_log$`w/adapters2` ,
+  with_both_primers = out[, 1],
+  filtered = out[, 2],
+  denoisedF = sapply(dadaFs, getN),
+  denoisedR = sapply(dadaRs, getN),
+  merged = sapply(mergers, getN),
+  nonchim = rowSums(seqtab_nochim),
+  perc_retained = rowSums(seqtab_nochim) / out[, 1] * 100
+)
+
+rownames(log_table) <- sample_names
+
+#On exporte la table finale.
+df_export(log_table, new_rn = "sample") |>
+  write.table(file = file.path(export_folder, "log_table.tsv"),
+              quote = FALSE,
+              sep = "\t",
+              row.names = FALSE)
 ```
 
