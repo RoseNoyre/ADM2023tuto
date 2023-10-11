@@ -1,0 +1,91 @@
+project:
+  type: website
+  render: 
+    - "index.qmd"
+    - "about.qmd"
+    - "/practicals/rforbeginer.Rmd"
+    - "/practicals/preprocessing_dada2.Rmd"
+    - "/practicals/preprocessing_phyloseq.Rmd"
+    - "/practicals/alpha_diversity.Rmd"
+    - "/practicals/beta_diversity.Rmd"
+execute:
+  freeze: auto  # re-render only when source changes
+website:
+  title: "ANF MetaBioDiv"
+  repo-url: https://github.com/ANF-MetaBioDiv/course-material
+  repo-actions: [edit, issue]
+  navbar:
+    left:
+      - text: Home
+        href: index.qmd
+      - text: Day 1
+        menu:
+        - text: "Practicals"
+        - text: "R for beginners"
+          href: practicals/rforbeginer.html
+      - text: Day 2
+        menu:
+        - text: "Courses"
+        - text: "Introduction"
+          href: courses/introduction.pdf
+        - text: "Analysing metabarcoding data with dada2"
+          target: "_blank"
+          href: courses/dada2.html
+        - text: "Introduction to phyloseq"
+          href: courses/phyloseq.html
+          target: "_blank"
+        - text: "Practicals"
+        - text: "Preprocessing: dada2"
+          href: practicals/preprocessing_dada2.html
+        - text: "Preprocessing: phyloseq"
+          href: practicals/preprocessing_phyloseq.html
+      - text: Day 3
+        menu:
+        - text: "Courses"
+        - text: "Alpha diversity"
+          href: courses/alpha_diversity.pdf
+          target: "_blank"
+        - text: "Introduction to univariate statistics"
+          href: courses/stat_mean_comparison.pdf
+          target: "_blank"
+        - text: "Practicals"
+        - text: "Alpha diversity"
+          href: practicals/alpha_diversity.html
+      - text: Day 4
+        menu:
+        - text: "Courses"
+        - text: "Beta diversity"
+          href: courses/beta_diversity.pdf
+          target: "_blank"
+        - text: "Practicals"
+        - text: "Beta diversity"
+          href: practicals/beta_diversity.html
+      - text: About
+        href: about.qmd
+    right:
+      - icon: github
+        href: https://github.com/ANF-MetaBioDiv/course-material
+        target: "_blank"
+  page-footer:
+    center: |
+      [![](/img/logo_abims.png){fig-alt="ABiMS" height=35px}](http://abims.sb-roscoff.fr/)
+      [![](/img/logo_beep.png){fig-alt="beep" height=40px}](https://www.umr-beep.fr/)
+      [![](/img/logo_ifb.png){fig-alt="IFB" height=40px}](https://www.france-bioinformatique.fr/)
+      [![](/img/logo_cnrs.svg){fig-alt="CNRS" height=40px}](https://www.cnrs.fr//)
+      [![](/img/logo_ird.png){fig-alt="IRD" height=40px}](https://www.ird.fr/)
+      [![](/img/logo_mio.png){fig-alt="MIO" height=40px}](https://www.mio.osupytheas.fr/)
+      [![](/img/logo_marbec.jpeg){fig-alt="marbec" height=40px}](https://umr-marbec.fr/)
+      [![](/img/logo_tara.png){fig-alt="marbec" height=30px}](https://umr-marbec.fr/)
+
+format:
+  html:
+    number-sections: true
+    shift-heading-level-by: -1
+    theme: 
+     - lumen
+     - custom_site_style.scss
+    toc: true
+    link-external-newwindow: true
+
+editor: visual
+
