@@ -1,0 +1,929 @@
+---
+title: "R Notebook"
+output: github_document
+---
+
+```{bash, eval=FALSE}
+git config --global user.email "you@example.com"
+git config --global user.name "Your Name"
+```
+
+1. On commence par charger toutes les librairies nécessaires. On charge également tous les outils en indiquant à R le chemin d'accès.
+
+```{r}
+library(phyloseq)
+library(ggplot2)
+library(dplyr)
+devtools::load_all(path="/home/rstudio/ADM2023tuto/course-material-main/R")
+```
+
+On commence par créer une variable output_beta qui contient le chemin d'accès vers un fichier. On demande à R de créer une direction vers la variable output_beta portant ce nom si jamais il n'existe pas. L'argument recursive = TRUE signifie qu'on autorise le fichier output_beta à créer des sous-dossiers.
+
+```{r}
+output_beta <- here::here("outputs", "beta_diversity")
+if (!dir.exists(output_beta)) dir.create(output_beta, recursive = TRUE)
+```
+
+On copie le dossier asv-table contenu dans le course-material-main dans le dossier data contenu dans ADM2023_tutoriel.
+
+```{bash}
+cp -R course-material-main/data/asv_table ./data/
+```
+
+On crée une variable physeq à laquelle on attribue la fonction pour lire le fichier .rds.
+
+```{r}
+physeq <- readRDS(here::here("data",
+                             "asv_table",
+                             "phyloseq_object_alpha_beta_div.rds"))
+```
+
+
+2.
+
+On a deux approches différentes pour le processus de normalisation des librairies. La première consiste à faire un échantillonage pour réduire le nombre d'observation. Cependant, cela revient à réduire l'échantillonage donc cela faire perdre des données. La seconde méthode emploie une analyse de données avec des ratios logarythmiques.
+
+
+Première méthode :
+On regarde combien de séquences on a par échantillon et on les traduit sous forme de tableau pour regarder leur abondance relative.
+
+```{r}
+rowSums(physeq@otu_table@.Data)
+```
+
+On crée un objet readsumsdf à qui on attribue la fonction data.frame, cela fait un tableau. nreads : nombre de séquences lues. decreasing = TRUE : les séquences sont classées par ordre décroissant d'abondance. sort = 1 : les séquences sont numérotées de 1 au nombre de taxa de physed. type = OTU : met les séquences dans des OTU.
+
+Ensuite, on crée un objet tmp à qui on attribue la fonction data.frame. On applique le même genre de paramètres pour créer un tableau similaire à readsumsdf.
+
+On combine les tableaux obtenus en un seul tableau avec la fonction rbind. Puis on affiche uniquement les séquences les plus abondantes avec la fonction head().
+
+```{r}
+readsumsdf <- data.frame(nreads = sort(taxa_sums(physeq), decreasing = TRUE),
+                        sorted = 1:ntaxa(physeq),
+                        type = "OTUs")
+
+tmp <- data.frame(nreads = sort(sample_sums(physeq), decreasing = TRUE), 
+                  sorted = 1:nsamples(physeq),
+                  type = "Samples")
+
+readsumsdf <- rbind(readsumsdf, tmp)
+
+head(readsumsdf)
+```
+
+On fait un graphique avec la fonction ggplot. On prend readsumsdf et on met en x les attributions et en y le nombres de reads des séquences. geom_bar est le nombre de séquences différentes. ggtitle permet d'afficher un titre choisi. L'échelle en y est en log10. 
+
+```{r}
+ggplot(readsumsdf, aes(x = sorted, y = nreads)) +
+  geom_bar(stat = "identity") +
+  ggtitle("Total number of reads") +
+  scale_y_log10() +
+  facet_wrap(~type, nrow = 1, scales = "free")
+```
+
+On s'assure que l'effort d'échantillonage est le même. On définit un minimum de lecture dans un échantillon.
+
+```{r}
+set.seed(10000)
+min(rowSums(physeq@otu_table@.Data))
+```
+
+On crée une variable physeq_rar pour l'échantillonage soit de 800 lectures par échanillon.
+
+```{r}
+physeq_rar <- rarefy_even_depth(physeq, sample.size = 800)
+rowSums(physeq_rar@otu_table@.Data)
+physeq
+physeq_rar
+```
+
+
+Deuxième méthode :
+
+```{r}
+tmp <- zCompositions::cmultRepl(physeq@otu_table,
+                                method = "CZM",
+                                label = 0,
+                                z.warning = 1)
+physeq_clr_asv <- apply(tmp, 1, function(x) log(x) - mean(log(x)))
+```
+
+```{r}
+physeq_clr <- physeq
+otu_table(physeq_clr) <- otu_table(t(physeq_clr_asv),
+                                   taxa_are_rows = FALSE)
+data.frame(physeq_clr@otu_table@.Data[1:5, 1:10])
+```
+
+
+3.
+
+```{r}
+physeq_phylum <- physeq_rar %>%
+  tax_glom(taxrank = "Family") %>%                    
+  transform_sample_counts(function(x) {x/sum(x)} ) %>%
+  psmelt() %>%                                       
+  filter(Abundance > 0.02) %>%                        
+  arrange(Family)                                      
+
+head(physeq_phylum)
+```
+
+```{r}
+treemap::treemap(physeq_phylum, index=c("Class", "Family"), vSize="Abundance", type="index",
+        fontsize.labels=c(15,12),                
+        fontcolor.labels=c("white","black"),    
+        fontface.labels=c(2,1),                 
+        align.labels=list(
+          c("center", "center"), 
+          c("left", "bottom")),                 
+        overlap.labels=0.5,                     
+        inflate.labels=F, 
+        border.col=c("black","white"),          
+        border.lwds=c(4,2),
+        fontsize.title=12
+)
+```
+
+```{r}
+tmp <- transform_sample_counts(physeq,function(x) {x/sum(x)} ) %>%
+  psmelt() %>%
+  group_by(Family, Class) %>%
+  summarise(abundance = sum(Abundance)) %>%
+  na.omit()
+
+ggplot(tmp,aes(area=abundance,label=Family,fill=Class,subgroup=Class))+
+  treemapify::geom_treemap()+
+  treemapify::geom_treemap_subgroup_border() +
+  treemapify::geom_treemap_subgroup_text(place = "centre",
+                                         grow = T,
+                                         alpha = 0.5,
+                                         colour = "black",
+                                         fontface = "italic",
+                                         min.size = 0) +
+  treemapify::geom_treemap_text(colour = "white",
+                                place = "topleft",
+                                reflow = TRUE)+
+  theme(legend.position="none")
+```
+
+```{r}
+ggsave(here::here(output_beta,"treemap_treemapify.pdf"))
+```
+
+```{r}
+ggplot(physeq_phylum, aes(x = Sample, y = Abundance, fill = Family)) + 
+  geom_bar(stat = "identity") +
+  ylab("Relative Abundance (Family > 2%)") +
+  scale_y_continuous(expand = c(0,0)) + 
+  ggtitle("Community composition") +
+  theme_bw() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_text(angle = 45, size = 10,
+                                   hjust = 0.5, vjust = 0.8),
+        axis.ticks.x = element_blank(),
+        panel.background = element_blank(), 
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank())  
+```
+
+```{r}
+ggsave(here::here(output_beta, "asv_composition.pdf"))
+```
+
+
+4.
+
+```{r}
+physeq_rar_jaccard <- phyloseq::distance(physeq_rar,
+                                         method = "jaccard",
+                                         binary = TRUE)
+physeq_rar_jaccard <- sqrt(physeq_rar_jaccard)
+```
+
+```{r}
+ape::is.rooted(physeq_rar@phy_tree)
+unifracs <- GUniFrac::GUniFrac(physeq_rar@otu_table@.Data, physeq_rar@phy_tree, alpha=c(0, 0.5, 1))$unifracs
+physeq_rar_du <- unifracs[, , "d_UW"]
+```
+
+```{r}
+tmp <- transform_sample_counts(physeq,function(x) {x/sum(x)} )
+physeq_rar_bray <- phyloseq::distance(tmp, method = "bray")
+```
+
+```{r}
+physeq_rar_dw <- unifracs[, , "d_1"] 
+```
+
+```{r}
+dist_methods <- unlist(distanceMethodList)
+data.frame(position = seq_along(dist_methods),
+           dist_methods)
+dist_methods <- dist_methods[c(1, 2, 10, 8)]
+dist_methods
+```
+
+```{r}
+plist <- vector("list")
+
+for(i in dist_methods){
+  iDist <- phyloseq::distance(physeq_rar, method = i)
+  iMDS <- ordinate(physeq_rar, "MDS", distance = iDist)
+  p <- NULL
+  p <- plot_ordination(physeq_rar, iMDS, color= "Geo")
+  p <- p + ggtitle(paste("MDS using distance method ", i, sep=""))
+  plist[[i]] = p 
+}
+```
+
+```{r}
+df <- plyr::ldply(plist, function(x) x$data)
+head(df)
+```
+
+```{r}
+names(df)[1] <- "distance"
+
+ggplot(df, aes(Axis.1, Axis.2, color = Geo)) +
+  geom_point(size=3, alpha=0.5) +
+  theme_bw() +
+  facet_wrap(~distance, scales="free") +
+  ggtitle("PCoA (MDS) on various distance metrics")
+```
+
+
+5.
+
+```{r}
+physeq_clr_dist <- phyloseq::distance(physeq_clr, method = "euclidean")
+```
+
+```{r}
+spe_single <- hclust(physeq_clr_dist, method = "single")
+spe_complete <- hclust(physeq_clr_dist, method = "complete")
+spe_upgma <- hclust(physeq_clr_dist, method = "average")
+spe_ward <- hclust(physeq_clr_dist, method = "ward.D")
+
+par(mfrow = c(2, 2))
+plot(spe_single, main = "single")
+plot(spe_complete, main = "complete")
+plot(spe_upgma, main = "UPGMA")
+plot(spe_ward, main = "ward")
+```
+
+```{r}
+spe_single_coph <- cophenetic(spe_single)
+cor(physeq_clr_dist, spe_single_coph)
+spe_complete_coph <- cophenetic(spe_complete)
+cor(physeq_clr_dist, spe_complete_coph)
+spe_upgma_coph <- cophenetic(spe_upgma)
+cor(physeq_clr_dist, spe_upgma_coph)
+spe_ward_coph <- cophenetic(spe_ward)
+cor(physeq_clr_dist, spe_ward_coph)
+```
+
+```{r}
+plot_coph_cor <- function(cophenetic_distance, hclust_type){
+  cor_res <- round(cor(physeq_clr_dist, cophenetic_distance),3)
+  plot(x = physeq_clr_dist,
+     y = cophenetic_distance,
+     xlab = "Aitchison distance",
+     ylab = "Cophenetic distance",
+     xlim = c(10, 35), ylim = c(10, 35),
+     main = c(hclust_type, paste("Cophenetic correlation ", cor_res)))
+  abline(0, 1)
+}
+
+par(mfrow=c(2,2))
+
+plot_coph_cor(cophenetic_distance = spe_complete_coph,
+              hclust_type = "Single linkage")
+
+plot_coph_cor(cophenetic_distance = spe_complete_coph,
+              hclust_type = "Complete linkage")
+
+plot_coph_cor(cophenetic_distance = spe_upgma_coph,
+              hclust_type = "Average linkage")
+
+plot_coph_cor(cophenetic_distance = spe_ward_coph,
+              hclust_type = "Ward linkage")
+```
+
+```{r}
+par(mfrow = c(1, 1))
+
+plot(x = spe_upgma$height,
+     y = phyloseq::nsamples(physeq_clr):2,
+     type = "S",
+     main = "Fusion levels - Aitchison - Average",
+     ylab = "k (number of cluster)",
+     xlab = "h (node height)")
+
+text(x = spe_upgma$height,
+     y = phyloseq::nsamples(physeq_clr):2,
+     labels = phyloseq::nsamples(physeq_clr):2,
+     col = "red",
+     cex = 0.8)
+```
+
+```{r}
+install.packages("NbClust", lib = ".")
+library("NbClust", lib.loc = ".")
+nclust <- nb_clust_all(data = t(physeq_clr_asv), seed = 1000)
+```
+
+```{r}
+k <- 2
+spe_upgma_clust <- cutree(tree = spe_upgma, k = k)
+table(spe_upgma_clust)
+spe_upgma_clust2 <- data.frame(UPGMA_clusters = spe_upgma_clust)
+```
+
+```{r}
+plot(spe_upgma,
+     hang = -1,
+     ylab = "Height",
+     main="Aitchison distance - UPGMA")
+
+rect.hclust(spe_upgma,
+            k = k,
+            border = 2:6,
+            cluster = spe_upgma_clust)
+
+legend("topright",
+       paste("Cluster", 1:k),
+       pch = 22,
+       col = 2:(k + 1),
+       bty = "n")
+```
+
+```{r}
+cs <- fpc::cluster.stats(d = physeq_clr_dist,
+                         clustering = spe_upgma_clust)
+
+cs$dunn
+```
+
+```{r}
+pourcentS <- phyloseq::transform_sample_counts(physeq_rar, function(x) x/sum(x) * 100)
+mytop30 <- names(sort(phyloseq::taxa_sums(pourcentS), TRUE)[1:30])
+selection30 <- phyloseq::prune_taxa(mytop30, pourcentS)
+selection30
+```
+
+```{r}
+selection30_asv <- phyloseq::otu_table(selection30)
+selection30_sample <- phyloseq::sample_data(selection30)
+rownames(selection30_asv)
+```
+
+```{r}
+sample_new_names <- paste(selection30_sample$SampName,
+                          selection30_sample$Description,
+                          sep = "_")
+
+heat <- t(base::scale(selection30_asv))
+head(data.frame(heat))
+```
+
+```{r}
+ComplexHeatmap::Heatmap(
+  heat,
+  row_names_gp = grid::gpar(fontsize = 6),
+  cluster_columns = FALSE,
+  heatmap_legend_param = list(direction = "vertical",
+                              title = "Z-scores", 
+                              grid_width = unit(0.5, "cm"),
+                              legend_height = unit(3, "cm"))
+)
+```
+
+```{r}
+taxon <- phyloseq::tax_table(selection30) |>
+  as.data.frame()
+myname <- paste(rownames(taxon), taxon$Phylum, taxon$Family, sep="_")
+colnames(selection30_asv) <- myname
+```
+
+```{r}
+heat <- t(scale(selection30_asv))
+
+my_top_annotation <- ComplexHeatmap::anno_block(gp = grid::gpar(fill =c(3,4)),
+                                               labels = c(1, 2),
+                                               labels_gp = grid::gpar(col = "white",
+                                                                      fontsize = 10))
+
+ComplexHeatmap::Heatmap(
+  heat,
+  row_names_gp = grid::gpar(fontsize = 6),
+  cluster_columns =TRUE,
+  heatmap_legend_param = list(direction = "vertical",
+   title ="Z-scores",
+   grid_width = unit(0.5, "cm"),
+   legend_height = unit(4, "cm")),
+  top_annotation = ComplexHeatmap::HeatmapAnnotation(foo = my_top_annotation),
+  column_km = 2,
+  column_names_gp= grid::gpar(fontsize = 6)
+  )
+```
+
+```{r}
+boxplot <- ComplexHeatmap::anno_boxplot(t(selection30_asv), 
+                                        which = "row",
+                                        gp = grid::gpar(fill = "turquoise3"))
+
+my_boxplot_left_anno <- ComplexHeatmap::HeatmapAnnotation(Abund = boxplot,
+                                                          which = "row",
+                                                          width = unit(3, "cm"))
+
+my_top_anno <- ComplexHeatmap::anno_block(gp = grid::gpar(fill = c(3, 6)),
+                                          labels = c("South", "North"),
+                                          labels_gp = grid::gpar(col = "white",
+                                                                fontsize = 10))
+
+my_top_anno <- ComplexHeatmap::HeatmapAnnotation(foo = my_top_anno)
+
+ComplexHeatmap::Heatmap(
+  heat,
+  row_names_gp = grid::gpar(fontsize = 7),
+  left_annotation = my_boxplot_left_anno, 
+  heatmap_legend_param = list(direction = "vertical",
+                              title ="Z-scores",
+                              grid_width = unit(0.5, "cm"),
+                              legend_height = unit(3, "cm")),
+  top_annotation = my_top_anno,
+  column_km = 2,
+  cluster_columns = TRUE,
+  column_dend_side = "bottom",
+  column_names_gp = grid::gpar(fontsize = 7)
+  )
+```
+6.
+
+
+```{r}
+tax_CLR <-  as.data.frame(tax_table(physeq_clr))
+ASVname <- paste(rownames(tax_CLR), tax_CLR$Family, tax_CLR$Genus,sep="_")
+rownames(physeq_clr_asv) <- ASVname
+p <- PCAtools::pca(physeq_clr_asv,
+                   metadata = data.frame(sample_data(physeq_clr)))
+PCAtools::screeplot(p, axisLabSize = 18, titleLabSize = 22)
+```
+
+```{r}
+horn <- PCAtools::parallelPCA(physeq_clr_asv)
+horn$n
+elbow <- PCAtools::findElbowPoint(p$variance)
+elbow
+```
+
+```{r}
+PCAtools::biplot(
+  p,
+  lab = p$metadata$SampName,
+  colby = "Geo",
+  pointSize = 5,
+  hline = 0, vline = 0,
+  legendPosition = "right"
+)
+```
+
+```{r}
+PCAtools::biplot(
+  p, 
+  showLoadings = TRUE,
+  lengthLoadingsArrowsFactor = 1.5,
+  sizeLoadingsNames = 3,
+  colLoadingsNames = 'red4',
+  ntopLoadings = 3,
+  lab = p$metadata$X.SampleID,
+  colby = "Geo",
+  hline = 0, vline = 0,
+  legendPosition = "right"
+)
+```
+
+```{r}
+PCAtools::eigencorplot(
+  p,
+  components = PCAtools::getComponents(p, 1:horn$n),
+  metavars = c('SiOH4','NO2','NO3','NH4','PO4',
+              'NT','PT','Chla',"T", "S", "Sigma_t"),
+  col = c('white', 'cornsilk1', 'gold',
+          'forestgreen', 'darkgreen'),
+  cexCorval = 1.2,
+  fontCorval = 2,
+  posLab = "all",
+  rotLabX = 45,
+  scale = TRUE,
+  main = bquote(PC ~ Spearman ~ r^2 ~ environmental ~ correlates),
+  plotRsquared = TRUE,
+  corFUN = "spearman",
+  corUSE = "pairwise.complete.obs",
+  corMultipleTestCorrection = 'BH',
+  signifSymbols = c("****", "***", "**", "*", ""),
+  signifCutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, 1)
+)
+```
+
+```{r}
+pcoa_asv <- ape::pcoa(physeq_rar_bray)
+pcoa_coord <- pcoa_asv$vectors[, 1:2]
+hull <- data.frame("Axis.1" = pcoa_coord[, 1],
+                   "Axis.2" = pcoa_coord[, 2],
+                   "sample" = as.data.frame(sample_data(physeq_rar@sam_data)))
+
+hull_col <- c("#a65628","#1919ff")
+names(hull_col) <- c("North","South")
+
+hull_data <- hull %>%
+  dplyr::group_by(sample.Geo) %>%
+  dplyr::slice(chull(Axis.1,Axis.2)) %>%
+  dplyr::mutate(color = hull_col[sample.Geo])
+
+head(hull_data)
+```
+
+```{r}
+ggplot(data = hull, aes(x = Axis.1, y = Axis.2)) +
+  geom_hline(yintercept = 0, colour = "lightgrey", linetype = 2) +
+  geom_vline(xintercept = 0, colour = "lightgrey", linetype = 2) +
+  geom_polygon(data = hull_data,
+               aes(group = sample.Geo,
+                   fill = sample.Geo),
+               alpha = 0.3) + # add the convex hulls)
+  scale_fill_manual(values = c("Darkgrey", "#1919ff")) +
+  geom_point(data = hull,
+             aes(color = sample.Geo,
+                 size = sample.S),
+             alpha = 0.7) +
+  scale_color_manual(values = c("Darkgrey", "#1919ff")) +
+  xlab(paste("PCo1 (", round(pcoa_asv$values$Relative_eig[1]*100, 1), "%)")) +
+  ylab(paste("PCo2 (", round(pcoa_asv$values$Relative_eig[2]*100, 1), "%)")) +
+  theme_bw() +
+  coord_equal() +
+  theme(axis.title.x = element_text(size = 14), # remove x-axis labels
+        axis.title.y = element_text(size = 14), # remove y-axis labels
+        panel.background = element_blank(), 
+        panel.grid.major = element_blank(),  #remove major-grid labels
+        panel.grid.minor = element_blank(),  #remove minor-grid labels
+        plot.background = element_blank())
+```
+
+```{r}
+physeq_clr_nmds <- vegan::metaMDS(physeq_clr_dist, k=2, trymax=100)
+vegan::stressplot(physeq_clr_nmds)
+```
+
+```{r}
+nmds_coord <- data.frame(physeq_clr_nmds$points)
+
+hull <- data.frame("Axis.1" = nmds_coord[,1],
+                   "Axis.2" = nmds_coord[,2],
+                   "sample" = as.data.frame(sample_data(physeq_clr@sam_data)))
+
+hull_col <- c("#a65628","#1919ff")
+names(hull_col) <- c("North","South")
+
+hull_data <- hull %>%
+  dplyr::group_by(sample.Geo) %>%
+  dplyr::slice(chull(Axis.1,Axis.2)) %>%
+  dplyr::mutate(color = hull_col[sample.Geo])
+
+ggplot(hull,aes(x = Axis.1, y = Axis.2)) +
+  geom_hline(yintercept = 0, colour = "lightgrey", linetype = 2) + 
+  geom_vline(xintercept = 0, colour = "lightgrey", linetype = 2) +
+  geom_polygon(data = hull_data,
+               aes(group = sample.Geo,
+                   fill = sample.Geo),
+               alpha = 0.3) + 
+  scale_fill_manual(values = c("Darkgrey", "#1919ff")) +
+  geom_point(data = hull,
+             aes(color = sample.Geo,
+                 size = sample.S),
+             alpha = 0.7) +
+  scale_color_manual(values = c("Darkgrey", "#1919ff")) +
+  geom_text(data = hull_data,
+            x = -0, y = -9,
+            label = paste("Stress =", round(physeq_clr_nmds$stress, 2)),
+            colour = "Black",
+            size = 5)  +
+  xlab(paste("MDS1")) +
+  ylab(paste("MDS2")) +
+  theme_bw() +
+  coord_equal() +
+  theme(axis.title.x = element_text(size=14), 
+        axis.title.y = element_text(size=14), 
+        panel.background = element_blank(), 
+        panel.grid.major = element_blank(),  
+        panel.grid.minor = element_blank(),  
+        plot.background = element_blank())
+```
+
+```{r}
+data.frame(names(hull))
+env <- hull[, 13:23]
+ef <- vegan::envfit(physeq_clr_nmds, env, permu = 1000)
+ef
+```
+
+```{r}
+plot(physeq_clr_nmds, type = "t", display = "sites")
+plot(ef, p.max = 0.05)
+```
+
+
+7.
+
+```{r}
+metadata <- data.frame(sample_data(physeq_clr))
+results_permanova <- vegan::adonis2(physeq_clr_dist ~ Geo,
+                                    data = metadata,
+                                    perm = 1000)
+results_permanova
+```
+
+```{r}
+anova(vegan::betadisper(physeq_clr_dist, metadata$Geo))
+permanova <- vegan::adonis(t(physeq_clr_asv) ~ Geo,
+                            data = metadata,
+                            permutations = 1000,
+                            method = "euclidean")
+
+coef <- coefficients(permanova)["Geo1",]
+
+top.coef <- coef[rev(order(abs(coef)))[1:10]]
+
+par(mar = c(3, 14, 2, 1))
+
+barplot(sort(top.coef),
+        horiz = TRUE,
+        las = 1,
+        main = "Top taxa",
+        cex.names = 0.7)
+```
+
+```{r}
+permanova_S <- vegan::adonis2(physeq_clr_dist ~ S,
+                              data = metadata,
+                              perm = 1000)
+permanova_S
+```
+
+```{r}
+permanova_NH4 <- vegan::adonis2(physeq_clr_dist ~ NH4,
+                                data = metadata,
+                                perm = 1000)
+permanova_NH4
+```
+
+```{r}
+permanova_PT <- vegan::adonis2(physeq_clr_dist ~ PT,
+                               data = metadata,
+                               perm = 1000)
+permanova_PT
+```
+
+```{r}
+permanova_all <- vegan::adonis2(physeq_clr_dist ~ SiOH4 + NO2 + NO3 + NH4 + PO4 + NT + PT + Chla + T + S + Sigma_t,
+                                by="margin",
+                                data=metadata,
+                                perm=1000)
+
+permanova_all
+```
+
+```{r}
+cor_metadadata <- cor(metadata[, 11:21], method = "spearman")
+
+cor_mtest <- function(mat, ...) {
+  mat <- as.matrix(mat)
+  n <- ncol(mat)
+  p_mat <- matrix(NA, n, n)
+  diag(p_mat) <- 0
+  for (i in 1:(n - 1)) {
+    for (j in (i + 1):n) {
+      tmp <- cor.test(mat[, i], mat[, j], method = "spearman", ...)
+      p_mat[i, j] <- p_mat[j, i] <- tmp$p.value
+    }
+  }
+  colnames(p_mat) <- rownames(p_mat) <- colnames(mat)
+  p_mat
+}
+
+p_mat <- cor_mtest(metadata[, 11:21])
+
+corrplot::corrplot(cor_metadadata,
+                   type = "upper",
+                   order = "hclust",
+                   p.mat = p_mat,
+                   sig.level = 0.05,
+                   insig = "blank")
+```
+
+```{r}
+permanova_cor_pars <- vegan::adonis2(physeq_clr_dist ~ S + NO3 + NT + Chla + T,
+                                     by = "margin",
+                                     data = metadata,
+                                     perm = 1000)
+permanova_cor_pars
+```
+
+```{r}
+vegan::anosim(physeq_clr_dist, metadata$Geo, permutations = 1000)
+```
+
+
+8.
+
+```{r}
+spe_rda <- vegan::rda(t(physeq_clr_asv) ~ .,
+                      metadata[, 11:21])
+head(summary(spe_rda))
+```
+
+```{r}
+R2 <- vegan::RsquareAdj(spe_rda)$r.squared
+R2
+R2adj <- vegan::RsquareAdj(spe_rda)$adj.r.squared
+R2adj
+```
+
+```{r}
+anova(spe_rda, step = 1000)
+anova(spe_rda, by = "axis", step = 1000)
+```
+
+```{r}
+vegan::vif.cca(spe_rda)
+step_forward <- vegan::ordiR2step(vegan::rda(t(physeq_clr_asv) ~ 1,
+                                             data = metadata[, 11:21]),
+                                  scope = formula(spe_rda),
+                                  direction = "forward",
+                                  pstep = 1000)
+```
+
+```{r}
+spe_rda_pars <- vegan::rda(t(physeq_clr_asv) ~ S, data = metadata[, 11:21])
+anova(spe_rda_pars, step = 1000)
+anova(spe_rda_pars, step = 1000, by = "axis")
+```
+
+```{r}
+R2adj_pars <- vegan::RsquareAdj(spe_rda_pars)$adj.r.squared
+vegan::vif.cca(spe_rda)
+vegan::vif.cca(spe_rda_pars)
+```
+
+```{r}
+ii <- summary(spe_rda_pars)
+
+sp <- as.data.frame(ii$species[, 1:2]) * 2
+sp_top <- sp[order(abs(sp$RDA1), decreasing = TRUE), ][1:6, ]
+
+st <- as.data.frame(ii$sites[, 1:2])
+st <- merge(st,
+      metadata["Geo"],
+      by = "row.names")
+
+yz <- t(as.data.frame(ii$biplot[, 1:2]))
+row.names(yz) <- "Salinity"
+yz <- as.data.frame(yz)
+
+eigen_values <- format(100 *ii$cont[[1]][2,], digits=4)
+
+ggplot() +
+  geom_point(data = st, size = 4,
+             aes(x = RDA1, y = PC1,
+                 shape = Geo, fill = Geo)) +
+  scale_shape_manual(values = c(21:25)) +
+  geom_segment(data = sp_top,
+               arrow = arrow(angle = 22.5,
+                             length = unit(0.35, "cm"),
+                             type = "closed"),
+               linetype = 1, size = 0.6, colour = "red",
+               aes(x = 0, y = 0, xend = RDA1, yend = PC1)) +
+  ggrepel::geom_text_repel(data = sp_top,
+                           aes(x = RDA1, y = PC1, label = row.names(sp_top))) +
+  geom_segment(data = yz,
+               arrow = arrow(angle = 22.5,
+                             length = unit(0.35,"cm"),
+                             type = "closed"),
+               linetype = 1, size = 0.6, colour = "blue",
+               aes(x = 0, y = 0, xend = RDA1, yend = PC1)) +
+  ggrepel::geom_text_repel(data = yz, aes(RDA1, PC1, label=row.names(yz)))+
+  labs(x = paste("RDA 1 (", eigen_values[1], "%)", sep = ""),
+       y = paste("PC 1 (", eigen_values[2], "%)", sep = ""))+
+  geom_hline(yintercept = 0,linetype = 3,size = 1) + 
+  geom_vline(xintercept = 0,linetype = 3,size = 1)+
+  guides(shape = guide_legend(title = NULL,
+         color = "black"),
+         fill = guide_legend(title = NULL))+
+  theme_bw() +
+  theme(panel.grid = element_blank())
+```
+```{bash}
+cp -R /home/rstudio/ADM2023tuto/course-material-main/data/beta_diversity ./data
+```
+
+```{r}
+ANF_km <- readRDS(here::here("data","beta_diversity","spatial_distance.rds"))
+ANF_km_dist <- dist(ANF_km)
+```
+
+```{r}
+ANF_decay_exp <- betapart::decay.model(physeq_clr_dist/100,
+                                       ANF_km_dist,
+                                       y.type="dissim",
+                                       model.type="exp",
+                                       perm=100)
+plot(ANF_km_dist, physeq_clr_dist/100,
+     ylim=c(0, max(physeq_clr_dist/100)),
+     xlim=c(0, max(ANF_km_dist)),
+     xlab = "Distance (km)", ylab = "Dissimilarity (CLR)")
+
+betapart::plot.decay(ANF_decay_exp, col = "blue",
+                     remove.dots = TRUE, add = TRUE)
+
+legend("bottomright",
+       paste("exp: (Beta =", round(ANF_decay_exp$second.parameter, 4),
+             ", Rsqr =", round(ANF_decay_exp$pseudo.r.squared, 2),
+             ", p =", round(ANF_decay_exp$p.value, 2)),
+       fill = "blue")
+```
+
+```{r}
+physeq_clr_dist_square <- phyloseq::distance(physeq_clr,
+                                             method = "euclidean",
+                                             diag = TRUE,
+                                             upper = TRUE)
+ANF_km_dist_square <- dist(ANF_km, diag = TRUE, upper = TRUE)
+envdata <- dist(metadata[,11:21], diag = TRUE, upper = TRUE)
+ecodist::MRM(physeq_clr_dist_square ~ envdata + ANF_km_dist_square, nperm=1000)
+```
+
+```{r}
+ecodist::MRM(physeq_clr_dist_square ~ envdata, nperm=1000)
+ecodist::MRM(physeq_clr_dist_square ~ ANF_km_dist_square, nperm=1000)
+modEvA::varPart(A = 0.212, B = 0.238, AB = 0.366,
+                A.name = "Environmental",
+                B.name = "Dispersal limitation")
+```
+
+9.
+
+```{r}
+mm_lefse <- microbiomeMarker::run_lefse(physeq, norm = "CPM",
+                                        wilcoxon_cutoff = 0.01,
+                                        group = "Geo",
+                                        taxa_rank = "none",
+                                        kw_cutoff = 0.01,
+                                        multigrp_strat = TRUE,
+                                        lda_cutoff = 4)
+
+mm_lefse_table <- data.frame(mm_lefse@marker_table)
+mm_lefse_table
+```
+
+```{r}
+p_LDAsc <- microbiomeMarker::plot_ef_bar(mm_lefse)
+y_labs <- ggplot_build(p_LDAsc)$layout$panel_params[[1]]$y$get_labels()
+p_abd <- microbiomeMarker::plot_abundance(mm_lefse, group = "Geo") +
+  scale_y_discrete(limits = y_labs)
+gridExtra::grid.arrange(p_LDAsc, p_abd, nrow = 1)
+```
+
+```{r}
+mm_ancombc <- run_ancombc_patched(
+  physeq,
+  group = "Geo",
+  taxa_rank = "none",
+  pvalue_cutoff = 0.001,
+  p_adjust = "fdr"
+)
+
+mm_ancombc_table <- data.frame(mm_ancombc@marker_table)
+mm_ancombc_table
+```
+
+```{r}
+an_ef <- microbiomeMarker::plot_ef_bar(mm_ancombc)
+y_labs <- ggplot_build(an_ef)$layout$panel_params[[1]]$y$get_labels()
+an_abd <- microbiomeMarker::plot_abundance(mm_ancombc, group = "Geo") +
+  scale_y_discrete(limits = y_labs)
+gridExtra::grid.arrange(an_ef, an_abd, nrow = 1)
+```
+
+```{r}
+mm_aldex <- microbiomeMarker::run_aldex(physeq, group = "Geo",
+                                        norm = "CPM",
+                                        taxa_rank = "none",
+                                        p_adjust = "fdr")
+
+mm_aldex_table <- data.frame(mm_aldex@marker_table)
+mm_aldex_table
+```
+
+message.txt
+28 Ko
