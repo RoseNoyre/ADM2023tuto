@@ -1,10 +1,380 @@
 ---
-title: "ADM SARSCOV"
-output: html_document
-date: "2023-11-29"
+title: "ADM SARSCOV2"
+author: "Melanie Dutilly"
+date: "2024-01-02"
+output: gitub_document
 ---
+
+Bonjour Monsieur, au dernier cours, nous avions vu qu'il n'y avait en données que les séquences forward. Cependant, l'article parle de séquences forward et reverse. Malheureusement, je n'ai pas réussi à les trouver. De ce fait, le code ci dessous n'est que la théorie de ce que j'aurai essayé de faire pour effectuer les analyses qui sont dans l'article choisi car aucun chunck ne fonctionne...
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+```{bash, eval=FALSE}
+git config --global user.email "you@example.com"
+git config --global user.name "Your Name"
+```
+
+On commence par créer une variable "sequencesR1" pour y insérer les données des séquences forward (on ne possède pas de séquences reverse) qui contient le chemin d'accès vers un fichier. On vérifie si le répertoire spécifié par "sequencesR1" n'existe pas en utilisant la fonction dir.exists. Si le répertoire n'existe pas, alors la fonction dir.create va créer le répertoire. L'argument recursive = TRUE indique qu'on autorise le fichier sequences à créer des sous-dossiers.
+
+```{r}
+sequencesR1 <- here::here("data", "sequences")
+sequencesR1
+if (!dir.exists(sequencesR1)) dir.create(sequencesR1, recursive = TRUE)
+```
+On demande à R quelle est la valeur de "timeout" via la fonction "getOption".
+On dit à R d'augmenter la durée maximale d'exécution pour éviter qu'il arrête le téléchargement quand un chunck à besoin de temps pour s'executer . On lui donne 20 minutes.
+
+```{r}
+getOption("timeout")
+options(timeout=1200)
+```
+
+On créer un chemin de fichier pour le fichier "silva_nr99_v138.1_train_set.fa.gz".
+La fonction "file.path" construit un chemin du fichier. 
+
+```{r}
+silva_train_set <- file.path(sequencesR1, "silva_nr99_v138.1_train_set.fa.gz")
+silva_species_assignment <- file.path(sequencesR1,"silva_species_assignment_v138.1.fa.gz")
+```
+
+On télécharge ensuite les données sur Zenodo seulement si ces fichiers ne sont pas déjà présents localement. L'argument quiet = TRUE permet de faire le téléchargement sans afficher la progression du téléchargement (on supprime l'affichage des messages pendant le téléchargement).
+
+```{r}
+if (!file.exists(silva_train_set)) {
+  download.file(
+    "https://zenodo.org/record/4587955/files/silva_nr99_v138.1_train_set.fa.gz",
+    silva_train_set,
+    quiet = TRUE
+  )
+}
+
+
+if (!file.exists(silva_species_assignment)) {
+  download.file(
+    "https://zenodo.org/record/4587955/files/silva_species_assignment_v138.1.fa.gz",
+    silva_species_assignment,
+    quiet = TRUE
+  )
+}
+
+```
+
+On charge un package en cours de développement dans l'environnement via le chemin indiqué.
+
+```{r, eval=FALSE}
+devtools::load_all(path="/home/rstudio/ADM2023tuto/course-material-main/R")
+```
+On construit le chemin absolu du répertoire et on met le résultat dans la variable "graphiques".
+On vérifie si le répertoire spécifié par "graphiques" existe. Si celui ci n'existe pas, la fonction "dir.create" est utilisée pour créer le répertoire. L'argument "recursive=TRUE" indiquent les sous répertoires seront aussi créer. 
+La fonction "qualityprofile" permet de générer des graphiques qualités à partir des séquences qui se trouvent dans le répertoire "sequencesR1". 
+
+```{r}
+graphiques <- here::here("outputs",
+                             "dada2",
+                             "graphiques")
+
+if (!dir.exists(graphiques)) {
+  dir.create(graphiques, recursive = TRUE)
+}
+
+qualityprofile(sequencesR1, outfile = file.path(graphiques, "quality_plots.pdf"))
+
+```
+
+On souhaite raccourcir les séquences pour retirer les bases avec le moins bon Qscore. On crée une variable pour diriger R vers les séquences raccourcies. Pareil, si la direction n'existe pas, on crée une direction vers ce fichier.
+
+```{r}
+seq_trimmed <- here::here(
+  "outputs",
+  "dada2",
+  "trimmed"
+)
+
+if (!dir.exists(seq_trimmed)) dir.create(seq_trimmed, recursive = TRUE)
+```
+
+On attribue à l'amorce directe
+
+```{r}
+primer_R1  <- "ACTCCTACGGGAGGCAGCAG"
+```
+
+On lit les 10 premières (R1) en format fastq.
+
+```{r}
+Biostrings::readDNAStringSet(
+  sequencesR1[1],
+  format = "fastq",
+  nrec = 10
+)
+```
+
+La variable primer_log prend la fonction primer_trim comme objet. On retire les amorces par cette fonction. forward_files correxpond aux séquences forward (directe), primer_fwd correspond à l'amorce. output_dir permet de noter toutes les séquences raccourcies. Les séquences raccourcies doivent au minimum 200 pb.
+
+```{r}
+(primer_log <- primer_trim(
+  forward_files = sequencesR1,
+  primer_fwd = primer_R1,
+  output_dir = seq_trimmed,
+  min_size = 200
+))
+```
+
+On extrait les séquences raccourcies pour les séquences directes en demandant tous les noms.
+La fonction list.files sert à obtenir la liste des fichiers dans le répertoire spécifié par seq_trimmed. L'argument pattern ="_1" est utilisé pour filtrer les fichiers dont le nom contient "_1". L'argument full.names = TRUE est utilisé pour obtenir les chemins complets des fichiers. La fonction sort est utilisée pour trier la liste des fichiers.
+
+Ainsi, nopR1 contient la liste des chemins complets des fichiers dans le répertoire "seq_trimmed" dont les noms contiennent "_1" et ces chemins seront triés.
+
+```{r}
+nopR1 <- sort(list.files(seq_trimmed, pattern ="_1", full.names = TRUE))
+```
+
+On crée un répertoire "seq_filtrees" menant aux séquences triées. On vérifie que le répertorie existe. Si il n'existe pas, la fonction "dir.create" va créer le répertoire ainsi que les sous répertoires via l'argument "recursive = TRUE".
+
+```{r}
+seq_filtrees <- here::here("outputs", "dada2", "filtered")
+if (!dir.exists(seq_filtrees)) dir.create(seq_filtrees, recursive = TRUE)
+```
+
+La fonction file.path permet de créer un chemin de fichier en combinant le chemin du répertoire seq_filtrees avec le nom de base du chemin seqR1.
+Le résultat est stocké dans la variable filtR1. Cela donne le chemin complet du fichier dans le répertoire "filtered" avec le même nom de base que le fichier dans le répertoire "sequences".
+
+```{r}
+filtR1 <- file.path(seq_filtrees, basename(seqR1))
+```
+
+La fonction setNames va attribuer des noms aux éléments de la variable filtR1 (objet auquel on souhaite attribuer des noms) à partir des valeurs contenues dans la variable sample_names (la liste que l'on veut attribuer).
+
+```{r}
+filtR1 <- setNames(filtR1, sample_names)
+```
+
+On extrait uniquement les séquences sélectionnées par dada2. On entre les variables correspondantes aux séquences filtrées raccourcies directes. Dada2 ne prend pas en compte les séquences plus petites que 150nt. Il faut que chaque R1 ait une séquence R2 associée (mais je n'ai pas de séaquence reverse). Il ne faut pas d'ambiguités (argument maxN). MaxEE donne le nombre d'erreurs maximales admises, basée sur le calcul du Qscore. truncQ retire les séquences inférieure à un Qscore donné (2 = QScore de 20)
+
+```{r}
+(out <- dada2::filterAndTrim(
+  fwd = nopR1,
+  filt = filtR1,
+  minLen = 150,
+  matchIDs = TRUE,
+  maxN = 0,
+  maxEE = c(3, 3),
+  truncQ = 2
+))
+```
+
+Le taux d'erreur est estimé ensuite. On attribue à un nouvel objet errF et errR la fonction d'estimation d'erreurs de dada2, avec comme argument les séquences directes filtrées tirées aléatoirement parmi toutes les séquences filtrées totales. On applique la même fonction pour les séquences reverses. On applique ensuite la fonction dada2::plotErrors pour faire un graphique des erreurs estimées de chaque transition de base.
+
+```{r}
+errR1 <- dada2::learnErrors(filtR1,
+                           randomize = TRUE,
+                           multithread = TRUE)
+
+dada2::plotErrors(errR1, nominalQ=TRUE)
+```
+
+On retire ensuite les séquences lues en double. Pour chaque séquence unique, on compte le nombre de lectures.
+
+```{r}
+derepR1 <- dada2::derepFastq(filtR1, verbose = TRUE)
+```
+
+Ensuite, on fait correspondre l'erreur estimée sur les séquences uniques. 
+
+```{r}
+dadaR1 <- dada2::dada(derepR1, err = errR1, multithread = TRUE)
+```
+
+Cette fonction permet d'associer les séquences entre elles sans mismatch (erreur d'association des bases). L'argument verbose permet d'avoir un résumer de la fonction.
+
+```{r}
+mergers <- dada2::mergePairs(
+  dadaF = dadaR1,
+  derepF = derepR1,
+  maxMismatch = 0,
+  verbose = TRUE
+)
+```
+
+On fabrique une table compilant les séquences associées précedemment, avec le nombre de lecture pour chaque séquence.
+
+```{r}
+table <- dada2::makeSequenceTable(mergers)
+```
+
+On retire les séquences chimères qui résultent d'un mauvais appariement. Chaque séquence est passée au crible. On a ensuite le résumé.
+
+```{r}
+seqtab_nochim <- dada2::removeBimeraDenovo(table,
+                                           method = "consensus",
+                                           multithread = TRUE,
+                                           verbose = TRUE)
+```
+
+On associe ensuite une appartenance taxonomique à nos séquences. Cela permettra l'interprétation de nos séquences dans l'environnement. Cette appartenance s'effectue en 2 étapes. D'abord, on utilise l'algorithme de Wang et al pour assigner la taxonomie. On utilise les séquences précedemment obtenues. refFasta donne le chemin vers les séquences.taxLevels attribue le niveau taxonomique. minBoot est le niveau de confiance minimum pour l'aassociation taxonimique.
+
+```{r}
+taxonomy <- dada2::assignTaxonomy(
+  seqs = seqtab_nochim,
+  refFasta = silva_train_set,
+  taxLevels = c("Kingdom", "Phylum", "Class",
+                "Order", "Family", "Genus",
+                "Species"),
+  multithread = TRUE,
+  minBoot = 60
+)
+```
+
+Puis on attribue le rang espèces aux ASV qui sont identique à une séquence de référence.
+
+```{r}
+taxonomy <- dada2::addSpecies(
+  taxonomy,
+  silva_species_assignment,
+  allowMultiple = FALSE
+)
+```
+
+On exporte les données sous forme d'objets R, un pour la table d'ASV et une autre pour la taxonomie. On crée le fichier et on indique le chemin à R.
+
+```{r}
+export <- here::here("outputs", "dada2", "asv_table")
+
+if (!dir.exists(export)) dir.create(export, recursive = TRUE)
+
+saveRDS(object = seqtab_nochim,
+        file = file.path(export, "seqtab_nochim.rds"))
+
+saveRDS(object = taxonomy,
+        file = file.path(export, "taxonomy.rds"))
+```
+
+On collecte les séquences ASV et on attribue des ID uniques pour chaque séquence, afin que leur nom soit plus court. On renomme les variables en leur attribuant ce nouveau nom.
+
+```{r}
+ASV <- colnames(seqtab_nochim)
+ndigits <- nchar(length(ASV))
+asv_id <- sprintf(paste0("ASV_%0", ndigits, "d"), seq_along(ASV))
+row.names(taxonomy) <- colnames(seqtab_nochim) <- names(ASV) <- asv_id
+```
+
+Ces nouvelles identités sont collectées dans une nouvelle colonne asv. 
+
+```{r}
+taxonomy_export <- df_export(taxonomy, new_rn = "asv")
+
+seqtab_nochim_export <- t(seqtab_nochim)
+seqtab_nochim_export <- df_export(seqtab_nochim_export, new_rn = "asv")
+```
+
+On exporte ensuite la taxonomie,
+
+```{r}
+write.table(taxonomy_export,
+            file = file.path(export_folder, "taxonomy.tsv"),
+            quote = FALSE,
+            sep = "\t",
+            row.names = FALSE)
+```
+
+puis la table ASV,
+
+```{r}
+write.table(seqtab_nochim_export,
+            file = file.path(export_folder, "asv_table.tsv"),
+            quote = FALSE,
+            sep = "\t",
+            row.names = FALSE)
+```
+
+et les séquences en format FASTA
+
+```{r}
+cat(paste0(">", names(ASV), "\n", ASV),
+    sep = "\n",
+    file = file.path(export_folder, "asv.fasta"))
+```
+
+On assemble la table regroupant les statistiques à propos de chaque étape vu ci-dessus.
+
+```{r}
+getN <- function(x) sum(dada2::getUniques(x))
+
+log_table <- data.frame(
+  input = primer_log$in_reads,
+  with_fwd_primer = primer_log$`w/adapters`,
+  with_rev_primer = primer_log$`w/adapters2` ,
+  with_both_primers = out[, 1],
+  filtered = out[, 2],
+  denoisedF = sapply(dadaR1, getN),
+  denoisedR = sapply(dadaR2, getN),
+  merged = sapply(mergers, getN),
+  nonchim = rowSums(seqtab_nochim),
+  perc_retained = rowSums(seqtab_nochim) / out[, 1] * 100
+)
+
+rownames(log_table) <- sample_names
+```
+
+On exporte ensuite cette table.
+
+```{r}
+df_export(log_table, new_rn = "sample") |>
+  write.table(file = file.path(export, "log_table.tsv"),
+              quote = FALSE,
+              sep = "\t",
+              row.names = FALSE)
+```
+
+Nous allons effectuer un test d'alpha diversité normalized qui pourrait correspondre à la figure 3 de l'article se nommant :  Fig. 3: Normalized alpha diversity of the salivary microbiome over time. Alpha diversity as measured by Faith’s phylogenetic diversity (PD)
+normalized based on proportion of the first timepoint for each individual. A. SARS-CoV-2 infected subjects (n = 34) before, during, and after
+viral positivity and their 31 matched unexposed counterparts, with the study week shown relative to COVID infection with the week of the first
+positive test defined as week 0. B. SARS-CoV-2-infected subjects (n = 47) who were virus-positive at the first study visit and their 41 matched
+unexposed counterparts. There were no significant differences in either analysis between exposed and unexposed subjects (p > 0.05) when
+controlling for age and week of sampling, using linear mixed effects modeling.
+
+```{r}
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+  install.packages("BiocManager")
+}
+BiocManager::install("phyloseq")
+
+library(phyloseq)
+
+seqs_phyloseq <- phyloseq::phyloseq(OTU_table(sequencesR1))
+
+alpha_div <- diversity(seqs_phyloseq, index = "shannon")
+alpha_div_normalized <- alpha_div / sum(alpha_div)
+
+print(alpha_div_normalized)
+```
+
+Nous allons effectué un test de béta diversité qui pourrait correspondre à la figure 4 de l'article se nommant : Fig. 4: Beta diversity of the salivary microbiome over time. Panels: A. PCoA plots of unweighted and B. weighted UniFrac analyses of all
+timepoints for the 34 exposed subjects from before, during, and after viral positivity [colored by status relative to SARS-CoV2 infection] and
+their 31 matched unexposed subjects. C. Resilience of microbiome composition assessed by within-subject pairwise unweighted and D.
+weighted UniFrac distances between the first sample and later time points. Left panels: SARS-CoV-2-infected subjects (n = 34) before, during,
+and after viral positivity and their 31 matched unexposed subjects, with the study week shown relative to COVID infection with the week of the
+first positive test defined as week 0. Right panels: SARs-CoV-2-infected subjects (n = 47) who were virus-positive at the first study visit and
+their 41 matched unexposed subjects. No significant differences were found between exposed and unexposed subjects (p > 0.05) when
+controlling for age and week of sampling, using linear mixed effects modeling.
+
+```{r}
+bray_curtis_dist <- distance(seqs_phyloseq, method = "bray")
+print(bray_curtis_dist)
+```
+
+Nous allons effectué un test via les bar charts qui pourrait correspondre à la figure 5 de l'article se nommant : Fig. 5: Bar charts of taxon abundances in the salivary microbiome of subjects before, during, and after SARS-CoV-2 infection. Mean
+relative abundance of taxa at the phylum, genus, and species level of 34 exposed subjects before, during, and after viral positivity and their 31
+matched unexposed subjects using one sample per subject for each period in relation to infection. Taxa with mean relative abundance across all
+samples <1.5% are binned into ‘Other’. No significant differences were found between exposed and unexposed subjects (p > 0.05).
+
+```{r}
+dend <- as.dendrogram(hclust(bray_curtis_dist))
+
+seqs_with_dend <- merge_phyloseq(seqs_phyloseq, dend)
+
+p <- plot_bar(seqs_with_dend, fill = "SampleName")
+p
+```
